@@ -3,803 +3,605 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>eBay対応スタンプ合成ツール (一括処理/透過PNG)</title>
-    <!-- Tailwind CSSの読み込み -->
+    <title>Zero-One eBay 画像加工ツール</title>
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 'Inter'フォントを優先的に使用し、全体をモダンに */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f9fb; /* 非常に明るいオフホワイト */
+        /* カスタムスタイル: PC向け横長レイアウトに最適化 */
+        :root {
+            --color-primary: #4A5568; 
+            --color-accent: #4299E1;  /* Zero-One Blue */
+            --color-success: #10B981; /* Green */
         }
-        /* メインコンテナの影を強調 */
-        .main-card {
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        .card {
+            background-color: white;
+            border-radius: 1rem; /* 16px */
+            box-shadow: 0 4px 10px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
         }
-        /* Canvasコンテナのレスポンシブ調整 */
-        .canvas-container {
-            width: 100%;
-            padding-bottom: 75%; /* 4:3 Aspect Ratio (プレビューの縦横比の目安) */
+        
+        /* 3x5グリッドの外枠 */
+        .grid-container-3x5 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(5, 1fr);
             position: relative;
+        }
+
+        /* 39点の配置を可能にするためのオーバーレイ */
+        .placement-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            /* grid-template-columns: repeat(6, 1fr); 
+            grid-template-rows: repeat(10, 1fr); */
+            pointer-events: none; 
+            /* 内部の点は絶対位置で配置するため、このグリッドは補助線のみとして使う */
+        }
+
+        /* 個々の配置可能点 (39点) */
+        .placement-point {
+            position: absolute;
+            pointer-events: auto; /* クリック可能にする */
+            transition: all 0.1s ease-in-out;
+            z-index: 10;
+        }
+
+        /* 配置点の可視化とインタラクション */
+        .dot {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            border: 1px solid #718096; /* Gray border */
+            background-color: white;
+            opacity: 0.6;
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+
+        .placement-point:hover .dot {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.5);
+            background-color: var(--color-accent);
+            border-color: var(--color-accent);
+            box-shadow: 0 0 5px var(--color-accent);
+        }
+
+        .placement-point.selected .dot {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(2.0);
+            background-color: var(--color-accent);
+            border: 2px solid white;
+            box-shadow: 0 0 8px rgba(66, 153, 225, 0.8);
+        }
+
+        /* 補助線 (3x5のグリッド線) の描画 */
+        .grid-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            border: 2px solid #CBD5E0; /* 外部枠 */
+            border-radius: 1rem;
+            pointer-events: none;
             overflow: hidden;
         }
-        #imageCanvas {
+        .grid-overlay > div {
+            border: 1px solid #E2E8F0; /* 内部線 */
+        }
+        
+        /* ツールチップ風のラベル */
+        .label {
             position: absolute;
             top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #fff;
-            object-fit: contain; /* 画像をCanvasサイズに収める */
+            left: 50%;
+            transform: translateX(-50%) translateY(-100%);
+            padding: 2px 8px;
+            background-color: var(--color-accent);
+            color: white;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
         }
-        /* 配置ボタンのスタイル */
-        .position-button {
-            @apply flex items-center justify-center h-10 border border-slate-300 rounded-lg text-slate-600 bg-white hover:bg-slate-50 transition;
-        }
-        .position-button.active {
-            @apply bg-indigo-600 text-white border-indigo-600 shadow-md ring-4 ring-indigo-200;
-        }
-        
-        /* ファイル入力のデザインをカスタマイズ */
-        input[type="file"]::file-selector-button {
-            @apply cursor-pointer mr-3 py-2 px-4 rounded-full border-0 text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition duration-150;
+        .placement-point:hover .label {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-150%);
         }
 
-        /* スライダーの見た目を調整 */
-        input[type=range]::-webkit-slider-thumb {
-            @apply appearance-none w-4 h-4 bg-indigo-600 rounded-full cursor-pointer shadow-lg;
-        }
     </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans JP', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary-accent': '#4299E1',
+                        'secondary-gray': '#718096',
+                        'zero-one-blue': '#4299E1', 
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body class="min-h-screen flex flex-col antialiased p-4 sm:p-8">
-    
-    <!-- メインコンテナ - 中央に配置され、最大幅を設定 -->
-    <div class="max-w-7xl mx-auto w-full bg-white main-card rounded-3xl p-6 sm:p-10 border border-slate-100">
-        
-        <header class="pb-6 border-b border-indigo-100 mb-8 text-center">
-            <h1 class="text-3xl sm:text-4xl font-extrabold text-slate-800 tracking-tight">
-                🖼️ Image Stamp Batch Processor
-            </h1>
-            <p class="text-slate-500 mt-2">
-                eBayの商品画像に複数のロゴ/スタンプを重ねて一括処理します。（透過PNG対応）
-            </p>
+<body class="bg-gray-50 font-sans min-h-screen p-6 lg:p-10">
+
+    <!-- メインコンテナ: PC画面いっぱいに広がるレイアウト -->
+    <div class="w-full mx-auto container-base">
+        <header class="mb-6 border-b border-gray-200 pb-3">
+            <h1 class="text-4xl font-extrabold text-gray-800 tracking-tight">Zero-One eBay 画像加工ツール</h1>
+            <p class="text-secondary-gray mt-1">eBay出品画像にロゴやスタンプを配置し合成するツールです。</p>
         </header>
-        
-        <main class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+
+        <!-- メインコンテンツエリア: 左右分割 (設定/プレビュー) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
-            <!-- 1. 設定・コントロールパネル (左サイド) -->
-            <div class="lg:col-span-2 space-y-6">
-                
-                <!-- 1. ベース画像アップロード -->
-                <div class="p-5 bg-slate-50 rounded-xl border border-slate-200">
-                    <label class="block text-xl font-bold text-slate-800 mb-3">
-                        1. ベース画像 (商品画像)
-                    </label>
-                    <input type="file" id="imageUpload" accept="image/jpeg,image/png,image/webp" multiple 
-                           class="w-full text-sm text-slate-600">
-                    <p id="uploadStatus" class="text-sm text-red-500 mt-2 hidden">画像をアップロードしてください。</p>
+            <!-- LEFT: 設定パネル (5/12幅) -->
+            <div class="lg:col-span-5 flex flex-col gap-6">
+
+                <!-- スクールロゴ＆リンクエリア -->
+                <a href="https://drive.google.com/drive/folders/1sPwDa8j3QPQgwz4EXJJpJj0TolNDCFdC?usp=drive_link" target="_blank" class="card p-4 bg-zero-one-blue hover:bg-blue-600 transition duration-150 shadow-md flex items-center justify-center text-white font-semibold">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <span>推奨スタンプ画像フォルダ (Google Drive)</span>
+                </a>
+
+                <!-- 1. 画像アップロード -->
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-700 flex items-center">
+                        <span class="text-zero-one-blue mr-2 font-extrabold">1.</span> 画像の選択
+                    </h2>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">元画像 (出品写真)</label>
+                        <input type="file" id="originalImageUpload" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:text-white file:bg-zero-one-blue hover:file:bg-blue-600 transition duration-150 cursor-pointer">
+                        <p id="originalFileName" class="mt-2 text-xs text-gray-400">ファイル名: 未選択</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">スタンプ画像 (ロゴ/透かし PNG)</label>
+                        <input type="file" id="stampImageUpload" accept="image/png" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:text-white file:bg-pink-500 hover:file:bg-pink-600 transition duration-150 cursor-pointer">
+                        <p id="stampFileName" class="mt-2 text-xs text-gray-400">スタンプ未選択</p>
+                    </div>
                 </div>
 
-                <!-- 2. ロゴ/スタンプ設定 -->
-                <div class="p-5 bg-white rounded-xl shadow-lg border border-slate-200 space-y-4">
-                    <h3 class="text-xl font-bold text-slate-800 border-b pb-2 mb-4">2. スタンプ設定</h3>
+                <!-- 2. 配置グリッド（3x5分割法 + 交点） -->
+                <div class="card p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-700 flex items-center">
+                        <span class="text-zero-one-blue mr-2 font-extrabold">2.</span> 配置場所
+                    </h2>
+                    <p class="text-sm text-gray-500 mb-3">スタンプの中心位置を選択してください（四隅や境界線上の配置も可能です）。</p>
                     
-                    <!-- ロゴ画像アップロード -->
-                    <div class="space-y-2">
-                        <label class="block text-sm font-semibold text-slate-600">ロゴ画像 (透過PNG推奨)</label>
-                        <input type="file" id="logoUpload" accept="image/png,image/gif"
-                               class="w-full text-sm text-slate-600">
-                        <p id="currentLogoStatus" class="text-xs mt-1 hidden"></p>
-                    </div>
+                    <!-- 3x5グリッドの外枠とオーバーレイのコンテナ -->
+                    <div id="placementArea" class="relative w-full h-80 rounded-xl overflow-hidden bg-white">
+                        <!-- 3x5グリッドの補助線 -->
+                        <div class="grid-overlay">
+                            <!-- 15個の仮想セルを描画 (線を見やすくするため) -->
+                            <div></div><div></div><div></div>
+                            <div></div><div></div><div></div>
+                            <div></div><div></div><div></div>
+                            <div></div><div></div><div></div>
+                            <div></div><div></div><div></div>
+                        </div>
 
-                    <!-- 配置ポジション選択 -->
-                    <div class="space-y-2">
-                        <label class="block text-sm font-semibold text-slate-600">配置ポジション:</label>
-                        <div id="positionButtons" class="grid grid-cols-2 gap-3">
-                            <button data-pos="top-left" class="position-button">左上</button>
-                            <button data-pos="top-right" class="position-button active">右上</button>
-                            <button data-pos="bottom-left" class="position-button">左下</button>
-                            <button data-pos="bottom-right" class="position-button">右下</button>
+                        <!-- 39点のクリック可能なオーバーレイ -->
+                        <div id="placementOverlay" class="placement-overlay">
+                            <!-- 39個の placement-point がJSによって挿入されます -->
                         </div>
                     </div>
+                </div>
 
-                    <!-- サイズ調整 -->
-                    <div class="pt-2 space-y-2">
-                        <label for="sizeRatio" class="block text-sm font-semibold text-slate-600">
-                            ロゴ面積比: <span id="currentRatio" class="font-bold text-indigo-600">1/15</span> 
-                            <span class="text-xs text-slate-400">(1/4 ～ 1/30)</span>
-                        </label>
-                        <input type="range" id="sizeRatio" min="4" max="30" value="15" step="1" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
-                    </div>
-                    
-                    <button id="addStampButton" 
-                            class="w-full px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition disabled:opacity-50 mt-4"
-                            disabled>
-                        スタンプリストに追加 🚀
-                    </button>
+                <!-- 3. サイズ設定と操作 -->
+                <div class="card p-6 flex flex-col justify-between">
+                     <div>
+                        <h2 class="text-xl font-bold mb-4 text-gray-700 flex items-center">
+                            <span class="text-zero-one-blue mr-2 font-extrabold">3.</span> サイズ調整
+                        </h2>
+                        <label for="stampSize" class="block text-sm font-medium text-gray-700">元画像幅に対する割合 (%)</label>
+                        <div class="flex items-center mt-2">
+                            <input type="range" id="stampSize" min="5" max="50" value="15" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg accent-zero-one-blue" title="スタンプサイズ調整スライダー">
+                            <span id="sizeValue" class="ml-4 w-12 text-center text-lg font-bold text-zero-one-blue">15%</span>
+                        </div>
+                        <p class="mt-2 text-xs text-gray-500">スタンプ幅を元画像幅の5%〜50%で調整します。</p>
+                     </div>
+
+                     <div class="mt-6">
+                         <button id="applySettings" class="w-full py-3 px-4 bg-zero-one-blue hover:bg-blue-600 text-white font-bold rounded-xl shadow-lg transition duration-150 transform hover:scale-[1.01] disabled:bg-gray-300 disabled:cursor-not-allowed text-lg" disabled>
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                 <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                                 <path d="M7 12l5 5l10 -10" />
+                                 <path d="M2 12l5 5" />
+                             </svg>
+                             プレビューを更新
+                         </button>
+                         <p id="errorMessage" class="text-red-500 mt-3 text-sm text-center hidden">※元画像とスタンプ画像の両方を選択してください。</p>
+                     </div>
                 </div>
             </div>
-            
-            <!-- 2. プレビュー & リストエリア (右サイド) -->
-            <div class="lg:col-span-3 space-y-6">
-                
-                <!-- プレビュー -->
-                <div class="p-5 bg-white rounded-xl shadow-lg border border-slate-200">
-                    <h3 class="text-xl font-bold text-slate-800 mb-3">
-                        プレビュー 
-                        <span class="text-sm font-medium text-indigo-600 ml-2">
-                            (<span id="previewIndex">0</span> / <span id="totalImages">0</span>)
-                        </span>
-                    </h3>
+
+            <!-- RIGHT: プレビュー & ダウンロードエリア (7/12幅) -->
+            <div class="lg:col-span-7 flex flex-col gap-6">
+                <div class="card p-6 flex-grow flex flex-col">
+                    <h2 class="text-xl font-bold mb-4 text-gray-700 flex items-center">
+                        <span class="text-zero-one-blue mr-2 font-extrabold">4.</span> プレビューとダウンロード
+                    </h2>
                     
-                    <!-- 画像切り替えボタン -->
-                    <div class="flex justify-between items-center mb-3 space-x-2">
-                        <button id="prevImageButton" class="w-1/2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition disabled:opacity-30 text-sm font-medium">
-                            <span class="mr-1">←</span> 前の画像
+                    <div id="canvasContainer" class="relative w-full mx-auto shadow-2xl rounded-xl overflow-hidden bg-gray-200 flex justify-center items-center border-4 border-gray-100 flex-grow" style="min-height: 250px; aspect-ratio: 16 / 9;">
+                        <!-- プレビューキャンバスがここに配置されます -->
+                        <canvas id="previewCanvas" class="w-full h-auto"></canvas>
+                        <p id="canvasPlaceholder" class="absolute text-gray-500 text-lg p-10 text-center">元画像とスタンプ画像をアップロードし、「プレビューを更新」ボタンを押して確認してください。</p>
+                    </div>
+                    
+                    <!-- ダウンロードボタン -->
+                    <div class="mt-6 flex flex-col items-center">
+                        <button id="downloadButton" class="py-4 px-12 font-bold rounded-xl shadow-xl transition duration-300 transform hover:scale-[1.03] disabled:bg-gray-300 disabled:cursor-not-allowed text-xl" disabled>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 inline-block mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            合成画像をダウンロード (JPEG)
                         </button>
-                        <button id="nextImageButton" class="w-1/2 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition disabled:opacity-30 text-sm font-medium">
-                            次の画像 <span class="ml-1">→</span>
-                        </button>
                     </div>
-
-                    <!-- 個別ダウンロードボタン (NEW) -->
-                    <button id="downloadCurrentImageButton" 
-                            class="w-full px-4 py-2 mb-3 bg-indigo-500 text-white font-bold rounded-lg shadow hover:bg-indigo-600 transition disabled:opacity-30 text-sm"
-                            disabled>
-                        現在の画像をダウンロード (.jpg)
-                    </button>
-
-                    <div class="canvas-container shadow-xl rounded-lg overflow-hidden border border-slate-300">
-                        <canvas id="imageCanvas"></canvas>
-                        <p id="canvasPlaceholder" class="absolute inset-0 flex items-center justify-center text-slate-400 text-lg bg-gray-50/80">
-                            画像をアップロードしてください
-                        </p>
-                    </div>
-                </div>
-
-                <!-- レイヤーリスト -->
-                <div class="p-5 bg-white rounded-xl shadow-lg border border-slate-200">
-                    <h3 class="text-xl font-bold text-slate-800 mb-3 border-b pb-2">適用スタンプリスト</h3>
-                    <div id="activeStampsList" class="space-y-2 max-h-40 overflow-y-auto">
-                        <!-- アクティブなスタンプがここに追加される -->
-                        <p class="text-slate-400 text-sm">現在、適用するスタンプはありません。</p>
-                    </div>
-                    <button id="clearStampsButton" class="mt-4 text-red-500 hover:text-red-600 text-sm font-medium p-1 rounded-md hover:bg-red-50 transition">リストを全てクリア</button>
-                </div>
-
-                <!-- 4. 一括ダウンロード -->
-                <div class="p-5 bg-green-50 rounded-xl border border-green-200">
-                    <button id="downloadAllButton" 
-                            class="w-full px-6 py-3 bg-green-600 text-white font-bold text-lg rounded-xl shadow-xl hover:bg-green-700 transition duration-300 disabled:opacity-50"
-                            disabled>
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline mr-2" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L10 11.586l1.293-1.293a1 1 0 111.414 1.414l-2 2a1 1 0 01-1.414 0l-2-2a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v8a1 1 0 11-2 0V3a1 1 0 011-1z" clip-rule="evenodd" />
-                        </svg>
-                        全ての画像を一括ダウンロード (.zip)
-                    </button>
-                    <p id="downloadProgress" class="text-sm text-slate-600 mt-3 text-center hidden font-medium"></p>
                 </div>
             </div>
-            
-        </main>
 
-        <!-- フッターエリア -->
-        <footer class="mt-10 pt-6 border-t border-slate-100 text-center">
-            <p class="text-xs text-slate-400">
-                このツールは、ブラウザ内で画像処理を行うため、ファイルはサーバーにアップロードされません。
-            </p>
+        </div>
+
+        <footer class="mt-8 pt-4 border-t border-gray-200 text-center text-sm text-secondary-gray">
+            <p>&copy; Zero-One スクール専用ツール | Powered by Gemini</p>
         </footer>
-        
+
     </div>
 
-    <!-- JSZip Library for Zipping Files -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
-    <!-- JavaScript - 画像処理ロジック -->
     <script>
-        // --- DOM要素と初期設定 ---
-        const canvas = document.getElementById('imageCanvas');
-        const ctx = canvas.getContext('2d');
-        const imageUpload = document.getElementById('imageUpload');
-        const logoUpload = document.getElementById('logoUpload');
-        const addStampButton = document.getElementById('addStampButton');
-        const downloadAllButton = document.getElementById('downloadAllButton');
-        const downloadCurrentImageButton = document.getElementById('downloadCurrentImageButton'); // NEW
-        const positionButtons = document.getElementById('positionButtons');
-        const sizeRatioInput = document.getElementById('sizeRatio');
-        const currentRatioSpan = document.getElementById('currentRatio');
-        const activeStampsList = document.getElementById('activeStampsList');
-        const clearStampsButton = document.getElementById('clearStampsButton');
-        const downloadProgress = document.getElementById('downloadProgress');
-        const totalImagesSpan = document.getElementById('totalImages');
-        const previewIndexSpan = document.getElementById('previewIndex');
-        const canvasPlaceholder = document.getElementById('canvasPlaceholder');
-        const currentLogoStatus = document.getElementById('currentLogoStatus');
-        const prevImageButton = document.getElementById('prevImageButton');
-        const nextImageButton = document.getElementById('nextImageButton');
+        // グローバル変数と定数
+        const GRID_COLS = 3; // 3x5グリッドの横分割数
+        const GRID_ROWS = 5; // 3x5グリッドの縦分割数
 
-        // --- 状態管理変数 ---
-        let baseImages = []; // アップロードされた全てのベース画像ファイル (Fileオブジェクト)
-        let loadedLogoImage = null; // 現在アップロードされているロゴ画像 (Imageオブジェクト)
-        let activeStamps = []; // 適用するスタンプ設定のリスト
-        let currentPosition = 'top-right'; // 現在選択されているポジション (デフォルト)
-        let currentPreviewIndex = 0; // 現在プレビューしている画像のインデックス (0-based)
+        // 39点すべての配置座標を計算 (xRatio, yRatio)
+        const REAL_POSITIONS = []; 
+        let index = 0;
 
-        // --- ユーティリティ関数 ---
-
-        /**
-         * 面積比率に基づき、ロゴの合成後のサイズを計算する
-         * @param {number} baseWidth ベース画像の幅
-         * @param {number} baseHeight ベース画像の高さ
-         * @param {number} logoOriginalWidth ロゴの元の幅
-         * @param {number} logoOriginalHeight ロゴの元の高さ
-         * @param {number} ratio 面積比率の分母 (例: 15 for 1/15)
-         * @returns {{width: number, height: number}} 合成後の幅と高さ
-         */
-        function calculateLogoDimensions(baseWidth, baseHeight, logoOriginalWidth, logoOriginalHeight, ratio) {
-            if (logoOriginalWidth <= 0 || logoOriginalHeight <= 0 || ratio < 1) {
-                return { width: 0, height: 0 };
-            }
-            
-            const A_base = baseWidth * baseHeight;
-            const A_logo = A_base / ratio; // 目標ロゴ面積
-
-            const logo_aspect = logoOriginalWidth / logoOriginalHeight;
-
-            // W^2 / aspect = A_logo  -> W^2 = A_logo * aspect -> W = sqrt(A_logo * aspect)
-            const W_stamp = Math.sqrt(A_logo * logo_aspect);
-            
-            // H = W / aspect
-            const H_stamp = W_stamp / logo_aspect;
-            
-            return { width: W_stamp, height: H_stamp };
-        }
-
-        /**
-         * ロゴの配置座標を計算する (複数ロゴ対応)
-         * @param {number} canvasWidth Canvasの幅
-         * @param {number} canvasHeight Canvasの高さ
-         * @param {{width: number, height: number}} logoDimensions ロゴのサイズ
-         * @param {string} position 配置 ('top-left', 'top-right', 'bottom-left', 'bottom-right')
-         * @param {number} index スタンプのインデックス (0, 1, 2...)
-         * @returns {{x: number, y: number}} 配置座標
-         */
-        function calculatePosition(canvasWidth, canvasHeight, logoDimensions, position, index) {
-            const { width: stampWidth, height: stampHeight } = logoDimensions;
-            // 画面の短い辺の3%をマージンとする
-            const margin = Math.min(canvasWidth, canvasHeight) * 0.03; 
-
-            let x, y;
-            
-            // 複数のロゴを横に並べる場合のオフセット
-            let offsetX = index * (stampWidth + (margin / 2)); // ロゴ幅 + わずかな間隔
-            
-            switch (position) {
-                case 'top-left':
-                    x = margin + offsetX;
-                    y = margin;
-                    break;
-                case 'top-right':
-                    // 右端から配置開始
-                    x = canvasWidth - stampWidth - margin - offsetX; 
-                    y = margin;
-                    break;
-                case 'bottom-left':
-                    x = margin + offsetX;
-                    y = canvasHeight - stampHeight - margin;
-                    break;
-                case 'bottom-right':
-                    // 右端から配置開始
-                    x = canvasWidth - stampWidth - margin - offsetX;
-                    y = canvasHeight - stampHeight - margin;
-                    break;
-            }
-            return { x, y };
-        }
-
-        /**
-         * Canvasをクリアし、ベース画像と全てのスタンプを描画する
-         * @param {Image} baseImg - ベース画像
-         */
-        function drawCanvas(baseImg) {
-            if (!baseImg) return;
-
-            // Canvasサイズをベース画像に合わせる
-            canvas.width = baseImg.width;
-            canvas.height = baseImg.height;
-
-            // 1. ベース画像を全面に描画
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height);
-
-            if (activeStamps.length === 0) return;
-
-            // 2. アクティブなスタンプを描画
-            const stampsByPosition = {};
-            
-            // スタンプをポジションごとにグループ化
-            activeStamps.forEach(stamp => {
-                if (!stampsByPosition[stamp.position]) {
-                    stampsByPosition[stamp.position] = [];
-                }
-                stampsByPosition[stamp.position].push(stamp);
-            });
-
-            // ポジションごとに、インデックスを振り直して配置
-            Object.values(stampsByPosition).forEach(stamps => {
-                stamps.forEach((stamp, index) => {
-                    const logoOriginalWidth = stamp.image.width;
-                    const logoOriginalHeight = stamp.image.height;
-                    
-                    // サイズとポジションの計算
-                    const dims = calculateLogoDimensions(
-                        canvas.width, 
-                        canvas.height, 
-                        logoOriginalWidth, 
-                        logoOriginalHeight, 
-                        stamp.ratio
-                    );
-                    
-                    const pos = calculatePosition(
-                        canvas.width, 
-                        canvas.height, 
-                        dims, 
-                        stamp.position, 
-                        index // 同じポジション内のインデックス
-                    );
-
-                    // 3. Canvasにスタンプを描画
-                    ctx.drawImage(stamp.image, pos.x, pos.y, dims.width, dims.height);
+        // 4x6=24個の交点 (Junction)
+        for (let j = 0; j <= GRID_ROWS; j++) { // j=0 to 5 (6行)
+            const yRatio = j / GRID_ROWS;
+            for (let i = 0; i <= GRID_COLS; i++) { // i=0 to 3 (4列)
+                const xRatio = i / GRID_COLS;
+                
+                REAL_POSITIONS.push({
+                    xRatio: xRatio,
+                    yRatio: yRatio,
+                    type: 'Junction',
+                    index: index++
                 });
-            });
+            }
+        }
+
+        // 3x5=15個のセル中心 (Center)
+        for (let j = 0; j < GRID_ROWS; j++) {
+            const yRatio = (j + 0.5) / GRID_ROWS; 
+            for (let i = 0; i < GRID_COLS; i++) {
+                const xRatio = (i + 0.5) / GRID_COLS; 
+                
+                 REAL_POSITIONS.push({
+                    xRatio: xRatio,
+                    yRatio: yRatio,
+                    type: 'Center',
+                    index: index++
+                });
+            }
         }
         
+        
+        let originalImage = null;       // 元画像 (Imageオブジェクト)
+        let stampImage = null;          // スタンプ画像 (Imageオブジェクト)
+        let originalFileName = "";      // 元画像のファイル名 (ダウンロード用)
+        
+        // 初期位置は右上角 (Junction: index 3) に設定
+        let selectedPositionIndex = 3; 
+        let stampSizeRatio = 0.15; // 初期サイズは15%
+
+        // DOM要素
+        const originalImageUpload = document.getElementById('originalImageUpload');
+        const stampImageUpload = document.getElementById('stampImageUpload');
+        const originalFileNameDisplay = document.getElementById('originalFileName');
+        const stampFileNameDisplay = document.getElementById('stampFileName');
+        const placementOverlay = document.getElementById('placementOverlay');
+        const stampSizeRange = document.getElementById('stampSize');
+        const sizeValueSpan = document.getElementById('sizeValue');
+        const applySettingsButton = document.getElementById('applySettings');
+        const errorMessage = document.getElementById('errorMessage');
+        const canvas = document.getElementById('previewCanvas');
+        const ctx = canvas.getContext('2d');
+        const canvasPlaceholder = document.getElementById('canvasPlaceholder');
+        const canvasContainer = document.getElementById('canvasContainer'); 
+        const downloadButton = document.getElementById('downloadButton'); // ダウンロードボタン
+
+        // ====================================================================
+        // ユーティリティ関数
+        // ====================================================================
+
         /**
-         * プレビューを更新する
+         * 状態に応じて設定適用ボタンとダウンロードボタンの有効/無効を切り替えます。
          */
-        function updatePreview() {
-            // UI上のインデックス表示を更新
-            totalImagesSpan.textContent = baseImages.length;
-            previewIndexSpan.textContent = baseImages.length > 0 ? currentPreviewIndex + 1 : 0;
-            
-            // ボタンの有効/無効を更新
-            const isImageLoaded = baseImages.length > 0;
-            const isStampActive = activeStamps.length > 0;
-            
-            prevImageButton.disabled = currentPreviewIndex <= 0 || !isImageLoaded;
-            nextImageButton.disabled = currentPreviewIndex >= baseImages.length - 1 || !isImageLoaded;
-            
-            // 個別ダウンロードボタンと一括ダウンロードボタンの有効化/無効化
-            downloadCurrentImageButton.disabled = !(isImageLoaded && isStampActive);
-            downloadAllButton.disabled = !(isImageLoaded && isStampActive);
+        function updateButtonStates() {
+            const canApply = originalImage && stampImage;
+            applySettingsButton.disabled = !canApply;
 
+            errorMessage.classList.toggle('hidden', canApply);
+            if (canApply) {
+                errorMessage.textContent = "";
+            } else {
+                 errorMessage.textContent = "※元画像とスタンプ画像の両方を選択してください。";
+            }
+        }
 
-            if (isImageLoaded) {
-                // currentPreviewIndexに基づいたファイルを読み込む
-                const file = baseImages[currentPreviewIndex]; 
+        /**
+         * ファイルを読み込み、Imageオブジェクトとして返すPromise
+         * @param {File} file - 読み込むファイル
+         * @returns {Promise<Image>} Imageオブジェクト
+         */
+        function loadImage(file) {
+            return new Promise((resolve, reject) => {
+                if (!file) return reject("No file provided.");
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     const img = new Image();
-                    img.onload = () => {
-                        drawCanvas(img);
-                        // プレースホルダーを非表示に
-                        canvasPlaceholder.classList.add('hidden');
-                    };
+                    img.onload = () => resolve(img);
+                    img.onerror = () => reject("Failed to load image.");
                     img.src = event.target.result;
                 };
+                reader.onerror = () => reject("FileReader failed.");
                 reader.readAsDataURL(file);
-            } else {
-                // 画像がない場合
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                // Canvasの初期サイズを復元
-                canvas.width = 600; 
-                canvas.height = 450;
-                canvasPlaceholder.classList.remove('hidden');
-            }
-        }
-        
-        /**
-         * スタンプリストのUIを更新する
-         */
-        function updateStampListUI() {
-            activeStampsList.innerHTML = '';
-            if (activeStamps.length === 0) {
-                activeStampsList.innerHTML = '<p class="text-slate-400 text-sm p-2">スタンプがリストに追加されていません。</p>';
-            } else {
-                activeStamps.forEach((stamp, index) => {
-                    const ratioDisplay = `1/${stamp.ratio}`;
-                    const positionDisplay = {
-                        'top-left': '左上',
-                        'top-right': '右上',
-                        'bottom-left': '左下',
-                        'bottom-right': '右下'
-                    }[stamp.position] || stamp.position;
-
-                    const li = document.createElement('div');
-                    li.className = 'flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-200';
-                    li.innerHTML = `
-                        <div class="flex items-center space-x-3">
-                            <img src="${stamp.image.src}" class="w-10 h-10 object-contain rounded-md border p-1 bg-white" alt="スタンプ">
-                            <div>
-                                <p class="font-medium text-slate-700">スタンプ #${index + 1}</p>
-                                <p class="text-xs text-slate-500">位置: ${positionDisplay} / サイズ: ${ratioDisplay}</p>
-                            </div>
-                        </div>
-                        <button data-index="${index}" class="remove-stamp-button text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm6 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd" />
-                            </svg>
-                        </button>
-                    `;
-                    activeStampsList.appendChild(li);
-                });
-            }
-
-
-            // 削除ボタンのリスナーを再設定
-            document.querySelectorAll('.remove-stamp-button').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const index = parseInt(e.currentTarget.dataset.index);
-                    activeStamps.splice(index, 1);
-                    updateStampListUI();
-                });
             });
-
-            // ボタンの有効化/無効化を更新
-            updatePreview();
         }
+
+        // ====================================================================
+        // 描画処理
+        // ====================================================================
 
         /**
-         * 現在プレビュー中の画像にスタンプを適用し、単体でダウンロードする
+         * キャンバスに画像をレンダリングします。
          */
-        async function downloadCurrentStampedImage() {
-            if (baseImages.length === 0 || activeStamps.length === 0) return;
+        function renderCanvas() {
+            if (!originalImage) {
+                canvasPlaceholder.textContent = "元画像とスタンプ画像をアップロードし、「プレビューを更新」ボタンを押して確認してください。";
+                canvasPlaceholder.classList.remove('hidden');
+                canvasContainer.style.aspectRatio = '16 / 9'; // Placeholder aspect ratio
+                downloadButton.disabled = true;
+                return;
+            }
 
-            // ボタンを無効化し、メッセージを表示
-            downloadCurrentImageButton.disabled = true;
-            downloadAllButton.disabled = true;
-            downloadProgress.textContent = '⏳ 現在の画像を処理中...';
-            downloadProgress.classList.remove('hidden');
+            // Canvasサイズを元画像のネイティブサイズに合わせる
+            canvas.width = originalImage.naturalWidth;
+            canvas.height = originalImage.naturalHeight;
+            
+            // CSSでアスペクト比を設定
+            canvasContainer.style.aspectRatio = `${canvas.width} / ${canvas.height}`;
 
-            const file = baseImages[currentPreviewIndex];
-            const fileName = file.name.replace(/\.[^/.]+$/, ""); // 拡張子なしのファイル名
+            // 1. 元画像の描画 (JPEG保存のため白背景を確保)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(originalImage, 0, 0, canvas.width, canvas.height);
 
-            try {
-                // 1. ベース画像をロード
-                const baseImg = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const img = new Image();
-                        img.onload = () => resolve(img);
-                        img.onerror = () => reject(new Error('Image load failed'));
-                        img.src = e.target.result;
-                    };
-                    reader.readAsDataURL(file);
-                });
+            // 2. スタンプの描画 (スタンプ画像が読み込まれている場合)
+            if (stampImage) {
+                const img = stampImage;
 
-                // 2. 仮想Canvasを作成し、合成処理を行う (一括ダウンロードと同じロジック)
-                const tempCanvas = document.createElement('canvas');
-                const tempCtx = tempCanvas.getContext('2d');
-                
-                tempCanvas.width = baseImg.width;
-                tempCanvas.height = baseImg.height;
+                // スタンプのターゲットサイズ (元画像幅に対する割合)
+                const stampWidth = canvas.width * stampSizeRatio;
+                // アスペクト比を維持して高さを計算
+                const stampHeight = stampWidth * (img.naturalHeight / img.naturalWidth);
 
-                // ベース画像を描画
-                tempCtx.drawImage(baseImg, 0, 0, tempCanvas.width, tempCanvas.height);
+                // 選択された位置の座標を取得
+                const pos = REAL_POSITIONS.find(p => p.index === selectedPositionIndex);
+                if (!pos) return;
 
-                // スタンプを適用
-                const stampsByPosition = {};
-                activeStamps.forEach(stamp => {
-                    if (!stampsByPosition[stamp.position]) {
-                        stampsByPosition[stamp.position] = [];
-                    }
-                    stampsByPosition[stamp.position].push(stamp);
-                });
+                // スタンプの中心座標 (Cx, Cy)
+                const centerX = canvas.width * pos.xRatio;
+                const centerY = canvas.height * pos.yRatio;
 
-                Object.values(stampsByPosition).forEach(stamps => {
-                    stamps.forEach((stamp, index) => {
-                        const logoOriginalWidth = stamp.image.width;
-                        const logoOriginalHeight = stamp.image.height;
-                        
-                        const dims = calculateLogoDimensions(
-                            tempCanvas.width, 
-                            tempCanvas.height, 
-                            logoOriginalWidth, 
-                            logoOriginalHeight, 
-                            stamp.ratio
-                        );
-                        
-                        const pos = calculatePosition(
-                            tempCanvas.width, 
-                            tempCanvas.height, 
-                            dims, 
-                            stamp.position, 
-                            index 
-                        );
+                // 描画開始座標 (左上) を計算 (Cx - W/2, Cy - H/2)
+                const drawX = centerX - (stampWidth / 2);
+                const drawY = centerY - (stampHeight / 2);
 
-                        tempCtx.drawImage(stamp.image, pos.x, pos.y, dims.width, dims.height);
-                    });
-                });
+                // スタンプの描画
+                ctx.drawImage(img, drawX, drawY, stampWidth, stampHeight);
+            }
 
-                // 3. 画像データをダウンロード (JPEG形式)
-                const dataURL = tempCanvas.toDataURL('image/jpeg', 0.9);
-                const link = document.createElement('a');
-                link.href = dataURL;
-                
-                // --- ファイル名生成ロジックを更新 ---
-                const stampCount = activeStamps.length;
-                // スタンプが1つなら "_stamp", 複数なら "_stamps"
-                const stampSuffix = stampCount === 1 ? '_stamp' : (stampCount > 1 ? '_stamps' : ''); 
-                link.download = `${fileName}${stampSuffix}.jpg`;
-                // ------------------------------------
-
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-
-                downloadProgress.textContent = `✅ ${fileName}${stampSuffix}.jpg のダウンロードが完了しました！`;
-
-            } catch (error) {
-                console.error(`画像 ${file.name} の処理中にエラーが発生しました:`, error);
-                downloadProgress.textContent = `❌ エラー: ダウンロード処理中に失敗しました。コンソールを確認してください。`;
-            } finally {
-                // ダウンロードボタンを再有効化
-                downloadCurrentImageButton.disabled = false;
-                downloadAllButton.disabled = false;
+            // プレビュー表示を更新
+            canvasPlaceholder.classList.add('hidden');
+            
+            // 画像が合成されたのでダウンロードを可能にする
+            if (originalImage && stampImage) {
+                downloadButton.disabled = false;
             }
         }
 
+        // ====================================================================
+        // イベントハンドラ
+        // ====================================================================
 
-        // --- イベントリスナー ---
-
-        // 1. ベース画像アップロード
-        imageUpload.addEventListener('change', (e) => {
-            baseImages = Array.from(e.target.files);
-            currentPreviewIndex = 0; // 0番目の画像からプレビュー開始
-            
-            if (baseImages.length > 0) {
-                updatePreview();
-                uploadStatus.classList.add('hidden');
-            } else {
-                updatePreview(); // プレビューとUI表示をリセット
-                uploadStatus.textContent = '画像をアップロードしてください。';
-                uploadStatus.classList.remove('hidden');
-            }
-        });
-        
-        // 5. 画像切り替えボタンのイベントリスナー
-        prevImageButton.addEventListener('click', () => {
-            if (currentPreviewIndex > 0) {
-                currentPreviewIndex--;
-                updatePreview();
-            }
-        });
-
-        nextImageButton.addEventListener('click', () => {
-            if (currentPreviewIndex < baseImages.length - 1) {
-                currentPreviewIndex++;
-                updatePreview();
-            }
-        });
-
-        // NEW: 単体ダウンロードボタン
-        downloadCurrentImageButton.addEventListener('click', downloadCurrentStampedImage);
-
-
-        // 2. ロゴ画像アップロード
-        logoUpload.addEventListener('change', (e) => {
+        /**
+         * 元画像アップロード時の処理
+         */
+        originalImageUpload.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        loadedLogoImage = img;
-                        addStampButton.disabled = false;
-                        currentLogoStatus.textContent = `✅ ロード完了 (${img.width}x${img.height}px)`;
-                        currentLogoStatus.classList.remove('hidden', 'text-red-500');
-                        currentLogoStatus.classList.add('text-green-600');
-                    };
-                    img.onerror = () => {
-                        currentLogoStatus.textContent = 'エラー: 画像の読み込みに失敗しました。';
-                        currentLogoStatus.classList.remove('hidden', 'text-green-600');
-                        currentLogoStatus.classList.add('text-red-500');
-                    }
-                    img.src = event.target.result;
-                };
-                reader.readAsDataURL(file);
-            } else {
-                loadedLogoImage = null;
-                addStampButton.disabled = true;
-                currentLogoStatus.classList.add('hidden');
-            }
-        });
-        
-        // 3. 配置ポジション選択
-        positionButtons.querySelectorAll('.position-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                positionButtons.querySelectorAll('.position-button').forEach(btn => btn.classList.remove('active'));
-                e.currentTarget.classList.add('active');
-                currentPosition = e.currentTarget.dataset.pos;
-                updatePreview(); // ポジション変更時にプレビューを更新
-            });
-        });
-        
-        // 3. サイズスライダーの更新
-        sizeRatioInput.addEventListener('input', (e) => {
-            currentRatioSpan.textContent = `1/${e.target.value}`;
-            updatePreview(); // サイズ変更時にプレビューを更新
-        });
-        
-        // 3. スタンプ追加
-        addStampButton.addEventListener('click', () => {
-            if (!loadedLogoImage) {
-                currentLogoStatus.textContent = 'ロゴ画像を先にアップロードしてください。';
-                currentLogoStatus.classList.remove('hidden', 'text-green-600');
-                currentLogoStatus.classList.add('text-red-500');
-                return;
-            }
-
-            const newStamp = {
-                image: loadedLogoImage, // Imageオブジェクトをそのまま格納
-                position: currentPosition,
-                ratio: parseInt(sizeRatioInput.value, 10)
-            };
-            
-            activeStamps.push(newStamp);
-            updateStampListUI();
-            
-            // ロゴ画像のファイル入力はクリアし、次のロゴをアップロードしやすくする
-            logoUpload.value = '';
-            loadedLogoImage = null;
-            addStampButton.disabled = true;
-            currentLogoStatus.textContent = 'スタンプがリストに追加されました。新しいロゴをアップロードできます。';
-            currentLogoStatus.classList.remove('text-red-500');
-            currentLogoStatus.classList.add('text-green-600');
-        });
-
-        // スタンプリストクリア
-        clearStampsButton.addEventListener('click', () => {
-            activeStamps = [];
-            updateStampListUI();
-        });
-
-        // 4. 一括ダウンロード
-        downloadAllButton.addEventListener('click', async () => {
-            if (baseImages.length === 0 || activeStamps.length === 0) {
-                downloadProgress.textContent = '❌ エラー: ベース画像とスタンプ設定を完了してください。';
-                downloadProgress.classList.remove('hidden');
-                downloadAllButton.disabled = false;
-                return;
-            }
-
-            downloadAllButton.disabled = true;
-            downloadCurrentImageButton.disabled = true;
-            downloadProgress.classList.remove('hidden');
-
-            const zip = new JSZip();
-
-            // ZIPファイル内のファイル名に適用するサフィックスを事前に計算
-            const stampCount = activeStamps.length;
-            const stampSuffix = stampCount === 1 ? '_stamp' : (stampCount > 1 ? '_stamps' : '');
-
-            for (let i = 0; i < baseImages.length; i++) {
-                const file = baseImages[i];
-                const fileName = file.name.replace(/\.[^/.]+$/, ""); // 拡張子なしのファイル名
-
-                downloadProgress.textContent = `⏳ 処理中: ${i + 1} / ${baseImages.length} 枚...`;
-
+                originalFileName = file.name;
+                originalFileNameDisplay.textContent = `ファイル名: ${originalFileName}`;
                 try {
-                    const baseImg = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            const img = new Image();
-                            img.onload = () => resolve(img);
-                            img.src = e.target.result;
-                        };
-                        reader.readAsDataURL(file);
-                    });
-
-                    // 仮想Canvasを作成し、合成処理を行う
-                    const tempCanvas = document.createElement('canvas');
-                    const tempCtx = tempCanvas.getContext('2d');
-                    
-                    tempCanvas.width = baseImg.width;
-                    tempCanvas.height = baseImg.height;
-
-                    // 1. ベース画像を全面に描画
-                    tempCtx.drawImage(baseImg, 0, 0, tempCanvas.width, tempCanvas.height);
-
-                    // 2. スタンプを適用 (drawCanvas関数とロジックを共有)
-                    const stampsByPosition = {};
-                    activeStamps.forEach(stamp => {
-                        if (!stampsByPosition[stamp.position]) {
-                            stampsByPosition[stamp.position] = [];
-                        }
-                        stampsByPosition[stamp.position].push(stamp);
-                    });
-
-                    Object.values(stampsByPosition).forEach(stamps => {
-                        stamps.forEach((stamp, index) => {
-                            const logoOriginalWidth = stamp.image.width;
-                            const logoOriginalHeight = stamp.image.height;
-                            
-                            const dims = calculateLogoDimensions(
-                                tempCanvas.width, 
-                                tempCanvas.height, 
-                                logoOriginalWidth, 
-                                logoOriginalHeight, 
-                                stamp.ratio
-                            );
-                            
-                            const pos = calculatePosition(
-                                tempCanvas.width, 
-                                tempCanvas.height, 
-                                dims, 
-                                stamp.position, 
-                                index 
-                            );
-
-                            tempCtx.drawImage(stamp.image, pos.x, pos.y, dims.width, dims.height);
-                        });
-                    });
-
-                    // 3. 画像データをBlobとして取得
-                    const blob = await new Promise(resolve => {
-                        tempCanvas.toBlob(resolve, 'image/jpeg', 0.9); // eBay向けにJPEGで圧縮
-                    });
-                    
-                    // 4. ZIPに追加
-                    zip.file(`${fileName}${stampSuffix}.jpg`, blob);
-
+                    originalImage = await loadImage(file);
                 } catch (error) {
-                    console.error(`画像 ${file.name} の処理中にエラーが発生しました:`, error);
-                    downloadProgress.textContent = `⚠️ エラー: 画像 ${file.name} の処理に失敗。`;
+                    console.error("元画像の読み込みエラー:", error);
+                    originalImage = null;
                 }
+            } else {
+                originalImage = null;
+                originalFileName = "";
+                originalFileNameDisplay.textContent = `ファイル名: 未選択`;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                canvasPlaceholder.classList.remove('hidden');
             }
-
-            // ZIPファイルを生成し、ダウンロード
-            zip.generateAsync({ type: 'blob' })
-                .then(function(content) {
-                    const url = URL.createObjectURL(content);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `ebay_stamped_images_${Date.now()}.zip`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                    
-                    downloadProgress.textContent = '✅ ダウンロードが完了しました！';
-                    downloadAllButton.disabled = false;
-                    downloadCurrentImageButton.disabled = false;
-                })
-                .catch(error => {
-                    console.error('ZIPファイル生成中にエラーが発生しました:', error);
-                    downloadProgress.textContent = '❌ ZIPファイル生成中にエラーが発生しました。';
-                    downloadAllButton.disabled = false;
-                    downloadCurrentImageButton.disabled = false;
-                });
+            updateButtonStates();
         });
 
-        // --- 初期化 ---
-        document.addEventListener('DOMContentLoaded', () => {
-            // デフォルトポジションをactiveにする
-            document.querySelector(`.position-button[data-pos="${currentPosition}"]`).classList.add('active');
-            // 初期状態のサイズ比率を表示
-            currentRatioSpan.textContent = `1/${sizeRatioInput.value}`;
-            
-            // Canvasの初期サイズ設定（プレースホルダーとして）
-            canvas.width = 600; 
-            canvas.height = 450;
-            ctx.fillStyle = '#f7f7f7';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        /**
+         * スタンプ画像アップロード時の処理
+         */
+        stampImageUpload.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    stampImage = await loadImage(file);
+                    stampFileNameDisplay.textContent = `選択中のスタンプ: ${file.name}`;
+                } catch (error) {
+                    console.error("スタンプ画像の読み込みエラー:", error);
+                    stampImage = null;
+                    stampFileNameDisplay.textContent = "スタンプ画像の読み込みに失敗しました。";
+                }
+            } else {
+                stampImage = null;
+                stampFileNameDisplay.textContent = "スタンプ未選択";
+            }
+            updateButtonStates();
+        });
 
-            // 初期ボタン状態を更新
-            updatePreview(); 
+
+        /**
+         * 39点配置グリッドの初期化
+         */
+        function initializePlacementGridCorrected() {
+            placementOverlay.innerHTML = '';
+            
+            const placementArea = document.getElementById('placementArea');
+            const gridWidth = placementArea.offsetWidth;
+            const gridHeight = placementArea.offsetHeight;
+
+            REAL_POSITIONS.forEach(pos => {
+                // 絶対座標を計算
+                const x = pos.xRatio * gridWidth;
+                const y = pos.yRatio * gridHeight;
+                
+                const pointContainer = document.createElement('div');
+                pointContainer.className = 'placement-point';
+                pointContainer.dataset.index = pos.index;
+                pointContainer.dataset.type = pos.type;
+                
+                // 絶対位置で配置する
+                pointContainer.style.position = 'absolute';
+                pointContainer.style.left = `${x}px`;
+                pointContainer.style.top = `${y}px`;
+                pointContainer.style.width = '1px'; // ダミー幅
+                pointContainer.style.height = '1px'; // ダミー高さ
+                
+                const dot = document.createElement('div');
+                dot.className = 'dot';
+                dot.style.position = 'absolute';
+                dot.style.left = '0';
+                dot.style.top = '0';
+
+                const label = document.createElement('span');
+                label.className = 'label';
+                
+                // 選択可能な点であることを示すラベル（シンプル化）
+                label.textContent = pos.type === 'Junction' ? '交点' : '中心';
+                
+                pointContainer.appendChild(dot);
+                pointContainer.appendChild(label);
+
+                // 初期位置を選択状態にする
+                if (pos.index === selectedPositionIndex) {
+                    pointContainer.classList.add('selected');
+                }
+
+                pointContainer.addEventListener('click', (e) => {
+                    e.stopPropagation(); // 重なり防止
+                    // 全ての点から選択状態を解除
+                    document.querySelectorAll('#placementOverlay .placement-point').forEach(c => c.classList.remove('selected'));
+
+                    // クリックされた点を選択状態に
+                    pointContainer.classList.add('selected');
+                    selectedPositionIndex = pos.index;
+
+                    // 位置が変更されたら即座に再描画
+                    if (originalImage && stampImage) {
+                        renderCanvas();
+                    }
+                });
+                placementOverlay.appendChild(pointContainer);
+            });
+        }
+
+
+        /**
+         * サイズスライダーの値変更時の処理
+         */
+        stampSizeRange.addEventListener('input', (e) => {
+            const size = e.target.value;
+            sizeValueSpan.textContent = `${size}%`;
+            stampSizeRatio = size / 100;
+             // サイズが変更されたら即座に再描画（使いやすさ向上のため）
+            if (originalImage && stampImage) {
+                 renderCanvas();
+            }
+        });
+
+        /**
+         * 設定適用ボタンクリック時の処理
+         */
+        applySettingsButton.addEventListener('click', () => {
+            if (originalImage && stampImage) {
+                renderCanvas();
+            }
         });
         
+        /**
+         * ダウンロードボタンクリック時の処理
+         */
+        downloadButton.addEventListener('click', () => {
+            if (originalImage && stampImage) {
+                // 1. JPEG形式のデータURLとして取得 (品質は0.9に設定)
+                const dataURL = canvas.toDataURL('image/jpeg', 0.9);
+                
+                // 2. ファイル名を決定: [元のファイル名]_stamp.jpeg
+                const baseName = originalFileName.replace(/\.[^/.]+$/, ""); // 拡張子を除去
+                const downloadFileName = `${baseName}_stamp.jpeg`;
+
+                // 3. ダウンロードを実行
+                const a = document.createElement('a');
+                a.href = dataURL;
+                a.download = downloadFileName; 
+                
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        });
+
+        // ====================================================================
+        // 初期化
+        // ====================================================================
+
+        window.onload = () => {
+            const placementArea = document.getElementById('placementArea');
+            
+            // サイズ変更時のリセット処理
+            // コンテナのサイズに合わせて点を再配置するために必要
+            const resizeObserver = new ResizeObserver(() => {
+                 initializePlacementGridCorrected();
+            });
+
+            resizeObserver.observe(placementArea);
+
+            updateButtonStates();
+            canvasContainer.style.aspectRatio = '16 / 9';
+        };
     </script>
 </body>
 </html>
